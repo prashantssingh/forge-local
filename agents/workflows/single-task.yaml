@@ -1,0 +1,90 @@
+version: 1
+id: single-task
+name: Single Task
+enabled: true
+mode: sequential
+description: Plan, approve, implement, test, review, and record one small task.
+
+limits:
+  max_tasks: 1
+  max_files_changed: 8
+  repeated_failure_limit: 3
+
+stages:
+  - id: plan
+    role: planner
+    permission_tier: tier_1
+    action: Inspect relevant files and return a decision-complete small plan.
+    allowed_writes: []
+    recorded_by: orchestrator
+    report: run-plan.md
+    stop_if:
+      - scope is ambiguous
+      - limits would be exceeded
+
+  - id: approve-plan
+    role: human
+    permission_tier: tier_5
+    action: Approve, revise, or reject the recorded plan.
+    approval:
+      required: true
+      record_in: run-plan.md
+    stop_until_approved: true
+
+  - id: build
+    role: builder
+    permission_tier: tier_3
+    action: Create or use the approved agent branch and implement exactly one task.
+    allowed_writes:
+      - approved task files on agent branch
+      - agents/runs/<run-id>/run-status.md
+    report: run-status.md
+    stop_if:
+      - current branch is main
+      - STOPPED.md exists
+      - file limit would be exceeded
+
+  - id: test
+    role: tester
+    permission_tier: tier_4
+    action: Run approved safe checks and report all results.
+    allowed_writes:
+      - agents/runs/<run-id>/test-report.md
+      - agents/runs/<run-id>/run-status.md
+    report: test-report.md
+
+  - id: review
+    role: reviewer
+    permission_tier: tier_1
+    action: Review the diff against the approved plan and return a recommendation.
+    allowed_writes: []
+    recorded_by: orchestrator
+    report: review-report.md
+
+  - id: update-memory
+    role: memory
+    permission_tier: tier_2
+    action: Record only verified outcomes in durable project memory.
+    allowed_writes:
+      - docs/ai-context.md
+      - docs/ai-decisions.md
+      - docs/ai-todo.md
+      - docs/ai-log.md
+      - agents/runs/<run-id>/memory-update.md
+    report: memory-update.md
+
+  - id: accept-result
+    role: human
+    permission_tier: tier_5
+    action: Review diff and reports; approve revision, rejection, or local merge.
+    approval:
+      required: true
+      remote_push_separate: true
+
+completion_reports:
+  - run-plan.md
+  - run-status.md
+  - test-report.md
+  - review-report.md
+  - memory-update.md
+  - run-summary.md

@@ -1,0 +1,71 @@
+version: 1
+id: autopilot
+name: Autopilot (Future, Disabled)
+enabled: false
+mode: sequential
+description: A future bounded loop over pre-approved TODOs; v1 provides policy only and does not execute it.
+
+activation_requirements:
+  - human explicitly enables the workflow for one named run
+  - every candidate task already exists in docs/ai-todo.md
+  - task selection and plan are approved before implementation
+  - implementation occurs on an agent branch, never main
+
+limits:
+  max_tasks_from_env: AGENT_MAX_TASKS
+  default_max_tasks: 3
+  max_files_changed_per_task_from_env: AGENT_MAX_FILES_CHANGED
+  default_max_files_changed_per_task: 8
+  repeated_failure_limit: 3
+  parallel_agents: 1
+
+task_loop:
+  mode: one-task-at-a-time
+  stages:
+    - role: planner
+      permission_tier: tier_1
+      action: Plan only the next eligible TODO.
+      human_approval_required: true
+    - role: builder
+      permission_tier: tier_3
+      action: Implement only the approved task on the agent branch.
+    - role: tester
+      permission_tier: tier_4
+      action: Run approved safe checks and report every result.
+    - role: reviewer
+      permission_tier: tier_1
+      action: Return an independent approve, revise, or reject recommendation.
+    - role: memory
+      permission_tier: tier_2
+      action: Update durable memory only after verification.
+    - role: human
+      permission_tier: tier_5
+      action: Approve continuation to another TODO.
+      approval_required_before_next_task: true
+
+always_stop_before:
+  - dependency or package changes
+  - external network access
+  - deleting or renaming files
+  - migrations or persistent-data changes
+  - authentication or security changes
+  - deployment configuration changes
+  - exceeding task or file limits
+  - merge, push, publish, or protected-branch changes
+
+never_allowed:
+  - modify main directly
+  - push to a remote
+  - run commands blocked by permissions.yaml
+  - access secrets
+  - run agents or heavy models in parallel
+  - continue when STOPPED.md exists
+
+completion_requirements:
+  - every task has plan, test, review, and memory reports
+  - final run summary lists completed and incomplete work
+  - human reviews the final diff
+
+notice: >-
+  No v1 script executes this workflow automatically. Enabling this YAML flag
+  alone does not create autonomy or grant permissions.
