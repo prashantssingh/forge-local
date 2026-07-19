@@ -47,6 +47,9 @@ agents/runs/**/*.log
 agents/runs/**/*.pid
 agents/runs/**/*.sock
 
+# Local bootstrap process logs and PID files.
+.forge-local-runtime/
+
 # Locally downloaded model artifacts, if added outside Ollama.
 models/
 *.gguf

@@ -85,6 +85,7 @@ forge-local/
 ├── .gitignore
 ├── scripts/
 │   ├── setup-ollama.sh
+│   ├── bootstrap.sh
 │   ├── pull-models.sh
 │   ├── start-webui.sh
 │   ├── stop-webui.sh
@@ -149,7 +150,7 @@ forge-local/
 Install these yourself. Dependency installation and downloads use the network and are not performed by the scaffold.
 
 1. **Git and curl:** included with or available through standard macOS developer tools.
-2. **Ollama for macOS:** download from [ollama.com/download/mac](https://ollama.com/download/mac) and run it natively.
+2. **Native Ollama for macOS:** use the macOS app from [ollama.com/download/mac](https://ollama.com/download/mac) or an existing native CLI installation. The bootstrap opens `Ollama.app` when available and otherwise starts `ollama serve` through the native CLI.
 3. **Docker Desktop for Mac:** install from [Docker's macOS guide](https://docs.docker.com/desktop/setup/install/mac-install/), then start Docker Desktop.
 4. **Aider:** follow [Aider's installation guide](https://aider.chat/docs/install.html). A common official path is:
 
@@ -160,7 +161,44 @@ Install these yourself. Dependency installation and downloads use the network an
 
 Do not give an agent approval to install these on your behalf during the first setup.
 
-## Initial setup
+## One-command setup and startup
+
+After installing the prerequisites, run this from the project root:
+
+```sh
+./scripts/bootstrap.sh
+```
+
+That single command:
+
+- Creates `.env` only when it is missing and preserves existing settings.
+- Restores executable permissions and creates only missing memory files.
+- Verifies Git, curl, native Ollama, and Docker Desktop.
+- Opens `Ollama.app` when available; for CLI-only installations, starts native `ollama serve` with an 8K context target and records its PID/log under `.forge-local-runtime/`.
+- Opens Docker Desktop when it is installed but not running and waits for readiness.
+- Pulls the primary and fallback models only when they are missing.
+- Starts Open WebUI, waits for it, and runs the complete health check.
+- Prints the local URLs and the next Aider command.
+
+It does not silently install missing host applications and does not start Aider, because Aider is an interactive editing session that must begin on an isolated branch.
+
+Useful options:
+
+```sh
+./scripts/bootstrap.sh --dry-run
+./scripts/bootstrap.sh --with-qdrant
+./scripts/bootstrap.sh --experimental
+```
+
+Qdrant and the memory-heavy 30B model remain opt-in. The experimental option is not recommended on this 16 GB Mac.
+
+If executable permissions were lost while copying the project, use:
+
+```sh
+sh scripts/bootstrap.sh
+```
+
+## Manual setup equivalent
 
 From this project root:
 
@@ -180,6 +218,8 @@ What each step does:
 - `pull-models.sh` pulls only the 14B primary and 7B fallback.
 - `start-webui.sh` starts only Open WebUI and preserves its named volume.
 - `check-health.sh` checks Docker, Ollama, both models, and the UI.
+
+These individual commands remain useful for troubleshooting, but normal first-time setup should use `./scripts/bootstrap.sh`.
 
 If native Ollama is installed but not serving, open the macOS app. To start it manually with an 8K target in a dedicated terminal:
 
@@ -390,11 +430,18 @@ Blocked commands and actions are listed in `agents/policies/permissions.yaml`. V
 
 ## Daily usage
 
-Typical start:
+Typical full-stack start:
+
+```sh
+./scripts/bootstrap.sh
+```
+
+The bootstrap command starts or verifies Ollama and Docker, ensures the requested models exist, starts Open WebUI, and checks the stack. It does not open an interactive model chat or Aider session.
+
+Start either interactive interface when you need it:
 
 ```sh
 ollama run qwen2.5-coder:14b
-./scripts/start-webui.sh
 ./aider/aider-start.sh
 ```
 
@@ -420,6 +467,7 @@ Then update `docs/ai-log.md` with the goal, changes, commands, checks, decisions
 
 ## First successful run checklist
 
+- [ ] `./scripts/bootstrap.sh` completes successfully.
 - [ ] Ollama is installed natively, not in Docker.
 - [ ] `./scripts/setup-ollama.sh` reports the API is responding.
 - [ ] `ollama list` contains `qwen2.5-coder:14b` and `qwen2.5-coder:7b`.

@@ -60,7 +60,7 @@ ForgeLocal AgentOS provides a beginner-friendly way to use local/open-source mod
 
 ## Current project state
 
-The initial scaffold contains Docker Compose configuration, local health and lifecycle scripts, Aider integration, role profiles, policies, workflow definitions, run templates, and operating documentation. Host dependencies, model downloads, and live services are not installed or started by scaffold creation; complete the onboarding checklist in the README.
+The initial scaffold contains Docker Compose configuration, local health and lifecycle scripts, Aider integration, role profiles, policies, workflow definitions, run templates, and operating documentation. Native Ollama CLI 0.12.8 is installed at `/opt/homebrew/bin/ollama`. Its API was not running at the last check, so the bootstrap now falls back to a background native `ollama serve` process when `Ollama.app` is unavailable. Default model downloads, Docker/Open WebUI startup, and live health verification remain pending.
 
 ## How agents should use this file
 

@@ -16,7 +16,7 @@ Run:
 ./scripts/setup-ollama.sh
 ```
 
-Install the native macOS application from [ollama.com/download/mac](https://ollama.com/download/mac). ForgeLocal intentionally does not install it automatically. Reopen the terminal if the `ollama` command remains unavailable after installation.
+Install native Ollama for macOS from [ollama.com/download/mac](https://ollama.com/download/mac), or use an existing native CLI installation. ForgeLocal intentionally does not install it automatically. Reopen the terminal if the `ollama` command remains unavailable after installation. CLI-only installations are supported by the bootstrap fallback described below.
 
 ## Ollama is installed but not responding
 
@@ -30,6 +30,19 @@ Open the Ollama app, or start the server in a separate terminal:
 
 ```sh
 OLLAMA_CONTEXT_LENGTH=8192 ollama serve
+```
+
+If Ollama was installed as a Homebrew CLI without `Ollama.app`, the one-command bootstrap automatically starts this native server in the background. It records:
+
+```text
+.forge-local-runtime/ollama.pid
+.forge-local-runtime/ollama.log
+```
+
+Inspect the log if startup fails:
+
+```sh
+tail -n 100 .forge-local-runtime/ollama.log
 ```
 
 If the port is already in use, an Ollama instance may already be running. Do not start a second server; inspect the existing process and app first.

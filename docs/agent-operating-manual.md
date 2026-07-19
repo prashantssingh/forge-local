@@ -6,6 +6,16 @@ ForgeLocal AgentOS is a supervised workflow. You remain the operator, approver, 
 
 ## Start a normal local AI session
 
+For the normal full-stack path, run:
+
+```sh
+./scripts/bootstrap.sh
+```
+
+It verifies or starts installed local services, pulls missing default models, starts Open WebUI, waits for readiness, and runs health checks. It does not launch an interactive Aider session.
+
+To operate each layer manually instead:
+
 1. Open the native Ollama macOS app, or start the server in a terminal:
 
    ```sh

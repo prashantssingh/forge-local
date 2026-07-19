@@ -4,7 +4,8 @@ Work from the top, one small item at a time. Do not mark operational checks comp
 
 ## Initial onboarding
 
-- [ ] Install Ollama natively on macOS.
+- [x] Add a one-command bootstrap for safe setup and startup. Completed on 2026-07-18.
+- [x] Install Ollama natively on macOS. Homebrew CLI 0.12.8 confirmed at `/opt/homebrew/bin/ollama` on 2026-07-18.
 - [ ] Pull the primary and fallback models.
 - [ ] Start Open WebUI.
 - [ ] Verify local chat works with `qwen2.5-coder:14b`.
