@@ -1,56 +1,12 @@
-# macOS
 .DS_Store
-.AppleDouble
-.LSOverride
-
-# Local environment and secrets
 .env
-.env.*
-!.env.example
-*.pem
-*.key
-
-# Python
-__pycache__/
-*.py[cod]
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-.venv/
-venv/
-env/
-
-# Node
-node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
-# Editors and temporary files
-.idea/
-.vscode/
-*.swp
-*.swo
-*~
-*.tmp
-*.temp
-
-# Aider local histories and caches
-.aider.chat.history.md
-.aider.input.history
-.aider.llm.history
-.aider.tags.cache.v*
-
-# Runtime-only agent artifacts. Markdown run reports remain tracked.
-agents/runs/**/runtime/
-agents/runs/**/*.log
-agents/runs/**/*.pid
-agents/runs/**/*.sock
-
-# Local bootstrap process logs and PID files.
+.runtime/
 .forge-local-runtime/
 
-# Locally downloaded model artifacts, if added outside Ollama.
-models/
-*.gguf
-*.safetensors
+# Durable local project memory may contain private prompts and analysis.
+data/*
+!data/.gitkeep
+
+# Local Go artifacts.
+forge-local
+coverage.out

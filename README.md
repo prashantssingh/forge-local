@@ -1,551 +1,244 @@
-# ForgeLocal AgentOS
+# ForgeLocal Brain
 
-ForgeLocal AgentOS is a local-first scaffold for project reasoning, coding assistance, durable project memory, and supervised multi-agent workflows on an Apple Silicon Mac. It combines native Ollama, Docker-hosted Open WebUI, Aider, Markdown memory, Git branches, and manual approval gates.
+One strong local reasoning service for every project.
 
-It is intentionally modest. The first version helps you run safe, observable workflows; it is not a fully autonomous coding platform.
+ForgeLocal Brain does four things:
 
-## What it can do
+1. Runs the strongest model that is genuinely feasible on this 16 GB M1 Pro.
+2. Stores and retrieves per-project progress, decisions, context, and analysis.
+3. Exposes a local HTTP API for ad hoc analysis from other applications.
+4. Uses bounded sequential sub-agents when a problem benefits from multiple perspectives.
 
-- Serve local coding models through native Ollama.
-- Provide a browser chat experience through Open WebUI in Docker.
-- Start with Qwen2.5-Coder 14B and fall back to the lighter 7B model.
-- Launch Aider with durable project context, decisions, tasks, and history.
-- Separate planning, building, testing, reviewing, memory, and research roles.
-- Create timestamped run folders with plans, status, test, review, and memory reports.
-- Keep implementation work isolated on Git branches.
-- Make risky actions and workflow limits explicit.
-- Add optional local Qdrant storage later without making it an MVP dependency.
+That is the entire product. There is no coding assistant, Docker stack, web UI, vector database, workflow library, or prompt-template hierarchy.
 
-## What it cannot safely do yet
-
-- Enforce an operating-system sandbox around arbitrary agent commands.
-- Execute the YAML workflows or call models automatically.
-- Guarantee that a model follows a Markdown permission policy.
-- Kill a running model or shell process when a stop marker is created.
-- Run several heavy agents or models concurrently on this hardware.
-- Auto-merge, auto-push, manage secrets, or deploy changes.
-- Replace human review of commands, diffs, tests, and reports.
-
-The v1 runner scripts manage artifacts and manual gates only. They never pretend that a folder of prompts is technical isolation or full autonomy.
-
-## Hardware target
-
-This project is designed for:
-
-- MacBook Pro 16-inch, 2021
-- Apple M1 Pro
-- 16 GB unified memory
-- macOS Tahoe 26.5.2
-
-That is a good fit for quantized 7B models and careful 14B use. It is not a large-model server. Keep context near 8K tokens to start, run one heavy model workload at a time, and use the 7B fallback when memory pressure rises.
-
-See [local hardware guidance](docs/local-hardware.md) and [model notes](docs/model-notes.md).
-
-## Why Ollama runs natively
-
-Docker Desktop runs Linux containers inside a virtual machine on macOS. Native Ollama can use the Apple Silicon acceleration path directly; a Linux Ollama container is therefore not the default for this Mac. ForgeLocal expects Ollama at:
+## Architecture
 
 ```text
-http://127.0.0.1:11434
+Other local apps
+      |
+      v
+ForgeLocal Brain API :8080
+      |-- retrieve relevant + recent project memory
+      |-- direct reasoning, or sequential sub-agent team
+      |-- persist the final analysis automatically
+      v
+Native Ollama :11434 -> gpt-oss:20b
+
+Durable memory -> data/projects/<project_id>/memory.jsonl
 ```
 
-There is deliberately no Ollama service in `docker-compose.yml`.
+Every model call is serialized. Team mode means several focused reasoning turns through the same loaded model—not several 14 GB models competing for memory.
 
-## Why Open WebUI runs in Docker
+## Why `gpt-oss:20b`
 
-Open WebUI is a light supporting application compared with the model server. Docker gives it a repeatable lifecycle and a named volume for accounts and settings. From the container, it reaches native Ollama through:
+This repository standardizes on one model: `gpt-oss:20b`.
+
+- OpenAI describes it as a strong open-weight reasoning and agentic model designed to run with 16 GB of memory.
+- Ollama's official artifact is about 14 GB and supports configurable low, medium, or high reasoning effort.
+- The 120B model needs roughly 65–80 GB and is not a local option for this Mac.
+
+ForgeLocal uses high reasoning effort and an 8K working context by default. The model advertises a much larger context, but using it would be irresponsible on a 16 GB machine. If memory pressure is high, set `BRAIN_CONTEXT_SIZE=4096`.
+
+Sources: [OpenAI gpt-oss announcement](https://openai.com/index/introducing-gpt-oss/), [Ollama gpt-oss model](https://ollama.com/library/gpt-oss), [Ollama thinking API](https://docs.ollama.com/capabilities/thinking).
+
+## Requirements
+
+- macOS with native Ollama available as the `ollama` command
+- Go 1.22 or newer
+- `curl`
+- About 14 GB of free disk space for the model
+
+Ollama runs natively, never in Docker.
+
+## Run it
+
+```sh
+./scripts/run.sh
+```
+
+On the first run, the script:
+
+- Creates `.env` from `.env.example` if needed.
+- Starts native `ollama serve` if the API is stopped.
+- Pulls `gpt-oss:20b` if missing.
+- Starts ForgeLocal Brain at `http://127.0.0.1:8080`.
+
+Keep that terminal open. Press `Control-C` to stop the Brain API. Ollama may remain running so the next start is faster.
+
+Check it:
+
+```sh
+curl -s http://127.0.0.1:8080/health
+```
+
+## Analyze something
+
+Direct mode uses the central model once, with relevant project memory:
+
+```sh
+curl -s http://127.0.0.1:8080/v1/analyze \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "project_id": "my-project",
+    "prompt": "Evaluate the main architectural risk and recommend the next decision."
+  }'
+```
+
+You may supply transient context without saving it separately:
+
+```json
+{
+  "project_id": "my-project",
+  "prompt": "Analyze these results and recommend the next experiment.",
+  "context": "Paste the relevant metrics or project facts here."
+}
+```
+
+Every successful analysis is automatically appended to that project's memory.
+
+## Use sub-agents
+
+Team mode asks the central brain to choose distinct expert perspectives, runs those sub-agents sequentially, then synthesizes their findings:
+
+```sh
+curl -s http://127.0.0.1:8080/v1/analyze \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "project_id": "my-project",
+    "mode": "team",
+    "max_agents": 3,
+    "prompt": "Stress-test this business plan from technical, market, and execution perspectives."
+  }'
+```
+
+The response includes each sub-agent's name, focus, finding, and the synthesized answer. The configured maximum is five; the default is three.
+
+Sub-agents reason only. They do not receive shell, filesystem, network, or code-editing tools.
+
+## Record progress and decisions
+
+Add durable memory explicitly:
+
+```sh
+curl -s http://127.0.0.1:8080/v1/memory \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "project_id": "my-project",
+    "kind": "progress",
+    "content": "Validated the pricing assumption; retention remains untested.",
+    "tags": ["validation", "next-step"]
+  }'
+```
+
+Memory kinds are:
+
+- `context`: durable facts and constraints
+- `progress`: work completed and current state
+- `decision`: choices and rationale
+- `analysis`: automatically stored Brain results
+
+## Retrieve continuity
+
+Get the latest memory:
+
+```sh
+curl -s 'http://127.0.0.1:8080/v1/memory?project_id=my-project&limit=10'
+```
+
+Search memory lexically:
+
+```sh
+curl -s 'http://127.0.0.1:8080/v1/memory?project_id=my-project&q=pricing+retention&limit=10'
+```
+
+List projects with memory:
+
+```sh
+curl -s http://127.0.0.1:8080/v1/projects
+```
+
+For every analysis, ForgeLocal retrieves relevant matches plus recent entries. This gives continuity even when the caller provides only a project ID and a new question.
+
+## API
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| `GET` | `/health` | Ollama and Brain configuration status |
+| `POST` | `/v1/analyze` | Direct or team reasoning with automatic memory |
+| `POST` | `/v1/memory` | Save context, progress, or decisions |
+| `GET` | `/v1/memory` | Retrieve recent or matching project memory |
+| `GET` | `/v1/projects` | List known project IDs |
+
+Requests and responses are JSON. Analysis requests are serialized because one loaded model is the correct concurrency model for this hardware.
+
+## Configuration
+
+Copy and edit `.env.example`, or let `scripts/run.sh` create `.env` automatically.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `BRAIN_ADDRESS` | `127.0.0.1:8080` | Brain API bind address |
+| `OLLAMA_URL` | `http://127.0.0.1:11434` | Native Ollama API |
+| `BRAIN_MODEL` | `gpt-oss:20b` | The single local model |
+| `BRAIN_CONTEXT_SIZE` | `8192` | Working context; use `4096` under pressure |
+| `BRAIN_REASONING` | `high` | `low`, `medium`, or `high` |
+| `BRAIN_DATA_DIR` | `./data` | Durable memory root |
+| `BRAIN_MEMORY_ITEMS` | `8` | Memory records supplied per analysis |
+| `BRAIN_MAX_AGENTS` | `3` | Maximum sequential sub-agents, up to five |
+| `BRAIN_API_KEY` | empty | Optional local API authentication |
+
+The API refuses to bind off loopback unless `BRAIN_API_KEY` is set. When set, callers must send either:
 
 ```text
-http://host.docker.internal:11434
+Authorization: Bearer <key>
 ```
 
-The UI is bound to loopback at `http://localhost:3000` by default. It is not exposed to the local network.
+or:
 
-## Model strategy
+```text
+X-API-Key: <key>
+```
 
-### Primary: `qwen2.5-coder:14b`
+## Memory ownership
 
-The 14B model is the default for planning, focused implementation, and review. Its quantized Ollama artifact is large enough to use most of this machine's comfortable memory headroom, so keep Docker services light and context modest.
+Memory is append-only JSON Lines under `data/projects/`. It is deliberately simple, inspectable, and local. The directory is ignored by Git because it may contain private project information.
 
-### Fallback: `qwen2.5-coder:7b`
+Back it up like any other local data:
 
-The 7B model is installed during normal setup. Use it for quicker sessions, simpler tasks, memory updates, and any time the Mac begins swapping or feels unresponsive.
+```sh
+cp -R data ../forge-local-data-backup
+```
 
-### Experimental: `qwen3-coder:30b`
+If a JSONL file is corrupted, ForgeLocal fails loudly rather than silently discarding continuity.
 
-The 30B model is never pulled by default. Its default Ollama artifact is roughly 19 GB before runtime overhead, making it unsuitable for normal use with 16 GB unified memory. The opt-in flag exists for deliberate experimentation, not as an upgrade recommendation.
+## Test
 
-## Project tree
+Tests use a fake Ollama server; they do not load the real model:
+
+```sh
+go test ./...
+```
+
+The test suite covers persistent retrieval, unsafe project IDs, direct analysis, automatic memory, team orchestration, and API authentication.
+
+## Files
 
 ```text
 forge-local/
 ├── README.md
-├── docker-compose.yml
 ├── .env.example
 ├── .gitignore
+├── go.mod
+├── main.go
+├── config.go
+├── memory.go
+├── ollama.go
+├── brain.go
+├── server.go
+├── memory_test.go
+├── server_test.go
 ├── scripts/
-│   ├── setup-ollama.sh
-│   ├── bootstrap.sh
-│   ├── pull-models.sh
-│   ├── start-webui.sh
-│   ├── stop-webui.sh
-│   ├── check-health.sh
-│   ├── init-project-memory.sh
-│   ├── create-agent-run.sh
-│   ├── agent-run.sh
-│   ├── agent-status.sh
-│   ├── agent-stop.sh
-│   └── summarize-run.sh
-├── aider/
-│   ├── aider-start.sh
-│   └── example-aider-prompts.md
-├── agents/
-│   ├── README.md
-│   ├── profiles/
-│   │   ├── orchestrator.md
-│   │   ├── planner.md
-│   │   ├── builder.md
-│   │   ├── tester.md
-│   │   ├── reviewer.md
-│   │   ├── memory.md
-│   │   └── researcher.md
-│   ├── workflows/
-│   │   ├── single-task.yaml
-│   │   ├── feature-build.yaml
-│   │   ├── bugfix.yaml
-│   │   ├── review-only.yaml
-│   │   ├── research-only.yaml
-│   │   └── autopilot.yaml
-│   ├── policies/
-│   │   ├── permissions.yaml
-│   │   ├── safety-rules.md
-│   │   └── human-approval.md
-│   ├── templates/
-│   │   ├── run-plan.md
-│   │   ├── run-status.md
-│   │   ├── test-report.md
-│   │   ├── review-report.md
-│   │   └── memory-update.md
-│   └── runs/
-│       └── .gitkeep
-├── docs/
-│   ├── ai-context.md
-│   ├── ai-decisions.md
-│   ├── ai-todo.md
-│   ├── ai-log.md
-│   ├── model-notes.md
-│   ├── troubleshooting.md
-│   ├── agent-architecture.md
-│   ├── agent-operating-manual.md
-│   └── local-hardware.md
-└── examples/
-    ├── curl-chat.sh
-    ├── project-session-prompt.md
-    ├── agent-run-prompt.md
-    └── first-agent-task.md
+│   └── run.sh
+└── data/
+    └── .gitkeep
 ```
-
-## Prerequisites
-
-Install these yourself. Dependency installation and downloads use the network and are not performed by the scaffold.
-
-1. **Git and curl:** included with or available through standard macOS developer tools.
-2. **Native Ollama for macOS:** use the macOS app from [ollama.com/download/mac](https://ollama.com/download/mac) or an existing native CLI installation. The bootstrap opens `Ollama.app` when available and otherwise starts `ollama serve` through the native CLI.
-3. **Docker Desktop for Mac:** install from [Docker's macOS guide](https://docs.docker.com/desktop/setup/install/mac-install/), then start Docker Desktop.
-4. **Aider:** follow [Aider's installation guide](https://aider.chat/docs/install.html). A common official path is:
-
-   ```sh
-   python -m pip install aider-install
-   aider-install
-   ```
-
-Do not give an agent approval to install these on your behalf during the first setup.
-
-## One-command setup and startup
-
-After installing the prerequisites, run this from the project root:
-
-```sh
-./scripts/bootstrap.sh
-```
-
-That single command:
-
-- Creates `.env` only when it is missing and preserves existing settings.
-- Restores executable permissions and creates only missing memory files.
-- Verifies Git, curl, native Ollama, and Docker Desktop.
-- Opens `Ollama.app` when available; for CLI-only installations, starts native `ollama serve` with an 8K context target and records its PID/log under `.forge-local-runtime/`.
-- Opens Docker Desktop when it is installed but not running and waits for readiness.
-- Pulls the primary and fallback models only when they are missing.
-- Starts Open WebUI, waits for it, and runs the complete health check.
-- Prints the local URLs and the next Aider command.
-
-It does not silently install missing host applications and does not start Aider, because Aider is an interactive editing session that must begin on an isolated branch.
-
-Useful options:
-
-```sh
-./scripts/bootstrap.sh --dry-run
-./scripts/bootstrap.sh --with-qdrant
-./scripts/bootstrap.sh --experimental
-```
-
-Qdrant and the memory-heavy 30B model remain opt-in. The experimental option is not recommended on this 16 GB Mac.
-
-If executable permissions were lost while copying the project, use:
-
-```sh
-sh scripts/bootstrap.sh
-```
-
-## Manual setup equivalent
-
-From this project root:
-
-```sh
-cp .env.example .env
-chmod +x scripts/*.sh aider/*.sh examples/*.sh
-./scripts/setup-ollama.sh
-./scripts/pull-models.sh
-./scripts/start-webui.sh
-./scripts/check-health.sh
-```
-
-What each step does:
-
-- `.env` holds local overrides and remains ignored by Git.
-- `setup-ollama.sh` checks native Ollama; it does not install or start it for you.
-- `pull-models.sh` pulls only the 14B primary and 7B fallback.
-- `start-webui.sh` starts only Open WebUI and preserves its named volume.
-- `check-health.sh` checks Docker, Ollama, both models, and the UI.
-
-These individual commands remain useful for troubleshooting, but normal first-time setup should use `./scripts/bootstrap.sh`.
-
-If native Ollama is installed but not serving, open the macOS app. To start it manually with an 8K target in a dedicated terminal:
-
-```sh
-OLLAMA_CONTEXT_LENGTH=8192 ollama serve
-```
-
-Then open [http://localhost:3000](http://localhost:3000). The first local account becomes the Open WebUI administrator; use a strong local password even though the port is loopback-only.
-
-## Optional Qdrant
-
-Qdrant is not required for chat, Aider, Markdown memory, or manual workflows. Start it only when evaluating a specific vector-memory use case:
-
-```sh
-./scripts/start-webui.sh --with-qdrant
-./scripts/check-health.sh --with-qdrant
-```
-
-It is available only at `http://localhost:6333` and stores data in a named volume. The MVP does not configure authentication because it is loopback-only; do not expose this service to a network.
-
-Stop both profile services without deleting volumes:
-
-```sh
-./scripts/stop-webui.sh --with-qdrant
-```
-
-## Use Ollama directly
-
-Terminal chat:
-
-```sh
-ollama run qwen2.5-coder:14b
-```
-
-OpenAI-compatible API example:
-
-```sh
-./examples/curl-chat.sh
-```
-
-Use the fallback when needed:
-
-```sh
-ollama run qwen2.5-coder:7b
-```
-
-The experimental model requires explicit intent:
-
-```sh
-./scripts/pull-models.sh --experimental
-```
-
-Read the warning in `docs/model-notes.md` before doing this.
-
-## Use Aider
-
-Check that Git has no unexplained changes, create an isolated branch, and launch:
-
-```sh
-git status --short
-git switch -c agent/manual-YYYY-MM-DD-small-goal
-./aider/aider-start.sh
-```
-
-The helper uses:
-
-```sh
-aider --model ollama_chat/qwen2.5-coder:14b \
-  docs/ai-context.md \
-  docs/ai-decisions.md \
-  docs/ai-todo.md \
-  docs/ai-log.md
-```
-
-The helper refuses to start on `main`, `master`, or a detached HEAD. It also verifies Aider, native Ollama, the primary model, and project-memory files.
-
-Those memory files are editable in the Aider session so verified work can update them. Use `/ask` for read-only discussion, inspect all proposed commands, and start with `aider/example-aider-prompts.md`.
-
-To use the fallback for one launch:
-
-```sh
-PRIMARY_MODEL=qwen2.5-coder:7b ./aider/aider-start.sh
-```
-
-## Project memory
-
-The four core files have separate purposes:
-
-- `docs/ai-context.md`: durable goals, architecture, constraints, and current state.
-- `docs/ai-decisions.md`: lasting architecture decisions in ADR form.
-- `docs/ai-todo.md`: ordered, verifiable work items.
-- `docs/ai-log.md`: concise session history and next steps.
-
-Git history is the audit trail. Agents should summarize verified outcomes instead of copying raw conversations. Recreate missing templates without overwriting existing memory:
-
-```sh
-./scripts/init-project-memory.sh
-```
-
-`--force` intentionally replaces the four files with starter templates; use it only after reviewing and backing up current memory.
-
-## How agent runs work
-
-A run is a folder of human-readable artifacts. Create one with:
-
-```sh
-./scripts/agent-run.sh --workflow single-task "Add one small, testable improvement"
-```
-
-The helper:
-
-- Validates the workflow name.
-- Creates `agents/runs/YYYY-MM-DD-HHMMSS-short-slug/`.
-- Copies the five report templates.
-- Records the goal and selected workflow.
-- Prints the next Orchestrator prompt and branch command.
-
-It does **not** call Ollama, execute a workflow, create a branch, run tests, approve actions, or merge code.
-
-Check the latest or a named run:
-
-```sh
-./scripts/agent-status.sh
-./scripts/agent-status.sh RUN_ID
-```
-
-Stop coordination for a run:
-
-```sh
-./scripts/agent-stop.sh RUN_ID "Reason for stopping"
-```
-
-Generate the final aggregate report:
-
-```sh
-./scripts/summarize-run.sh RUN_ID
-```
-
-Every meaningful run should preserve its completed plan, status, test report, review report, memory update, and summary. A report is evidence, not permission.
-
-## Single-task workflow
-
-The safest first workflow is:
-
-1. Orchestrator reads the goal, memory, policy, and workflow.
-2. Planner inspects relevant files and returns a small plan.
-3. Human records approval in `run-plan.md`.
-4. Builder works on `agent/<run-id>` and implements one task.
-5. Tester records exact checks and all failures.
-6. Reviewer returns `approve`, `revise`, or `reject` without editing files.
-7. Memory agent records only verified outcomes.
-8. Human reviews the diff and decides whether to accept locally.
-9. Merge and remote push remain separate human approvals.
-
-See `docs/agent-operating-manual.md` for exact instructions.
-
-## Evolve into multi-agent workflows
-
-Use several roles as controlled sequential turns through one model server. Do not start multiple heavy models or let multiple Builders edit concurrently.
-
-Available workflows:
-
-- `single-task`: one small implementation.
-- `feature-build`: at most three independently reviewed tasks by default.
-- `bugfix`: reproduce, diagnose, fix, regression-test, review.
-- `review-only`: read a diff and return findings without source edits.
-- `research-only`: answer one question; network access requires approval.
-- `autopilot`: future policy scaffold, disabled and not executable in v1.
-
-## Git branch isolation
-
-Git is the source of truth. Agent implementation never happens on `main`.
-
-After the plan is approved:
-
-```sh
-git status --short
-git switch -c agent/RUN_ID
-```
-
-Before acceptance:
-
-```sh
-git status --short
-git diff --stat main...HEAD
-git diff --check main...HEAD
-git diff main...HEAD
-```
-
-If the result is unsafe or wrong, stop the run and switch back to `main` without merging. Keep the branch until you have decided whether any work must be recovered.
-
-## Safety gates
-
-Human approval is required before:
-
-- Dependency installation, removal, or upgrades
-- External network access or downloads
-- File deletion, rename, truncation, or overwrite
-- Database and storage migrations
-- Authentication, authorization, cryptography, or security changes
-- Deployment, CI/CD, infrastructure, or production configuration changes
-- Secret or credential access
-- Elevated commands
-- Exceeding task or file limits
-- Remote push, publication, merge, or protected-branch changes
-
-Blocked commands and actions are listed in `agents/policies/permissions.yaml`. V1 relies on the operator to enforce them. Do not give a local model unrestricted shell or home-directory access.
-
-## Daily usage
-
-Typical full-stack start:
-
-```sh
-./scripts/bootstrap.sh
-```
-
-The bootstrap command starts or verifies Ollama and Docker, ensures the requested models exist, starts Open WebUI, and checks the stack. It does not open an interactive model chat or Aider session.
-
-Start either interactive interface when you need it:
-
-```sh
-ollama run qwen2.5-coder:14b
-./aider/aider-start.sh
-```
-
-Before agent implementation:
-
-```sh
-git status --short
-git switch -c agent/short-task-name
-```
-
-At the end of every meaningful session:
-
-```sh
-git status --short
-git diff
-```
-
-Then update `docs/ai-log.md` with the goal, changes, commands, checks, decisions, problems, and next steps. Stop the UI when finished:
-
-```sh
-./scripts/stop-webui.sh
-```
-
-## First successful run checklist
-
-- [ ] `./scripts/bootstrap.sh` completes successfully.
-- [ ] Ollama is installed natively, not in Docker.
-- [ ] `./scripts/setup-ollama.sh` reports the API is responding.
-- [ ] `ollama list` contains `qwen2.5-coder:14b` and `qwen2.5-coder:7b`.
-- [ ] `./scripts/start-webui.sh` starts the container.
-- [ ] `./scripts/check-health.sh` passes every required check.
-- [ ] Open WebUI opens at `http://localhost:3000`.
-- [ ] Open WebUI lists both local models.
-- [ ] A short prompt to the 14B model returns a useful response.
-- [ ] `./examples/curl-chat.sh` returns JSON from the local model.
-- [ ] Aider is installed and `./aider/aider-start.sh` reaches Ollama.
-- [ ] Activity Monitor shows acceptable memory pressure during a short session.
-- [ ] `docs/ai-log.md` records the successful setup and any deviations.
-
-## First agent run checklist
-
-- [ ] Read `agents/policies/safety-rules.md` and `agents/policies/human-approval.md`.
-- [ ] Run `./scripts/agent-run.sh --workflow single-task "Verify the scaffold documentation"`.
-- [ ] Copy the returned run ID.
-- [ ] Use `examples/first-agent-task.md` as the bounded goal.
-- [ ] Have the Planner return a plan without editing files.
-- [ ] Review and record human plan approval.
-- [ ] Create `agent/<run-id>`; confirm the branch is not `main`.
-- [ ] Give the Builder one documentation-only task.
-- [ ] Have Tester record safe checks in `test-report.md`.
-- [ ] Have Reviewer inspect the diff without modifying it.
-- [ ] Accept, revise, or reject the result yourself.
-- [ ] Have Memory update `docs/ai-log.md` and `docs/ai-todo.md` truthfully.
-- [ ] Generate and inspect `run-summary.md`.
-- [ ] Review the full Git diff before any merge.
-
-## Troubleshooting quick start
-
-```sh
-./scripts/check-health.sh
-docker compose ps
-docker compose logs --tail=100 open-webui
-ollama list
-ollama ps
-```
-
-Common problems—including Docker-to-Ollama connectivity, swapping, model fallback, Aider connection errors, stuck workflows, excessive changes, and branch recovery—are covered in [troubleshooting](docs/troubleshooting.md).
-
-## Future evolution
-
-Evolve only after the manual workflow is boring, repeatable, and well tested.
-
-### Qdrant
-
-Define what needs semantic retrieval, an embedding model, collection lifecycle, deletion policy, and privacy boundary. Keep Markdown and Git as the canonical memory; use Qdrant as a rebuildable index rather than the sole source of truth.
-
-### OpenHands
-
-Run it later in a disposable, narrowly mounted workspace with no secrets, network disabled by default, resource limits, an allowlisted command set, and mandatory branch checks. Map its events into the existing run reports and approval gates.
-
-### LangGraph
-
-LangGraph is a natural fit when you want a state machine that implements the existing sequential YAML stages. Persist explicit state, stop before every human gate, and make the `STOPPED.md` state terminal until human recovery.
-
-### AutoGen or CrewAI
-
-Use them as role-message coordinators, not as permission systems. Keep a single active local model call, one Builder, finite turns, and external enforcement around tools and paths.
-
-### Runtime hardening
-
-Before enabling any automated loop, add:
-
-- Workspace-level filesystem isolation
-- Command and path allowlists enforced outside prompts
-- Default-deny network egress
-- CPU, memory, time, task, and file limits
-- Programmatic protected-branch checks
-- Durable event and approval logs
-- Disposable-repository tests for failure and recovery
-
-`agents/workflows/autopilot.yaml` remains disabled until those controls exist.
-
-## Safety reminder
-
-Local does not automatically mean safe. A local model can still delete files, expose secrets, consume all memory, or make plausible but incorrect changes. Keep agents on branches, show every command, review every diff, preserve reports, and stop whenever scope or behavior becomes surprising.
-
-The goal of ForgeLocal AgentOS is controlled progress—not maximum autonomy.
